@@ -1,0 +1,75 @@
+from pathlib import Path 
+
+src = Path("/mnt/data/xison_social_platform_working.html")
+html = src.read_text(encoding="utf-8")
+
+# Add Google reCAPTCHA v2 explicit loader in the document head.
+html = html.replace(
+    "</head>",
+    '<script src="https://www.google.com/recaptcha/api.js?onload=xisonRecaptchaReady&render=explicit" async defer></script>\n</head>'
+)
+
+# Add a single challenge widget used before either account creation or login.
+html = html.replace(
+    '<button id="createBtn">Create account + download code</button>',
+    '<div class="small muted" style="margin:10px 0 12px">Verify you are human:</div><div id="xisonRecaptcha"></div>\n  <button id="createBtn">Create account + download code</button>'
+)
+
+# Add callbacks and a small helper before the existing account logic.
+html = html.replace(
+    "const KEY='xison_account_v1', POSTS='xison_posts_v1', SESSION='xison_session_v1';",
+    """const XISON_RECAPTCHA_SITE_KEY='6Ld4DxUuAAAAAEZwssN2bRPy04WmROvYyShIFAPk';
+let xisonCaptchaWidgetId=null, xisonCaptchaToken='';
+window.xisonRecaptchaReady=function(){
+  if(!window.grecaptcha || xisonCaptchaWidgetId!==null) return;
+  try {
+    xisonCaptchaWidgetId=grecaptcha.render('xisonRecaptcha',{
+      sitekey:XISON_RECAPTCHA_SITE_KEY,
+      callback:function(token){xisonCaptchaToken=token;},
+      'expired-callback':function(){xisonCaptchaToken='';},
+      'error-callback':function(){xisonCaptchaToken='';}
+    });
+  } catch(e) { console.warn('reCAPTCHA could not load:',e); }
+};
+function xisonCaptchaPassed(){
+  if(!xisonCaptchaToken){setMsg('Please complete the reCAPTCHA check first.','error');return false;}
+  return true;
+}
+function resetXisonCaptcha(){
+  xisonCaptchaToken='';
+  if(window.grecaptcha && xisonCaptchaWidgetId!==null) grecaptcha.reset(xisonCaptchaWidgetId);
+}
+const KEY='xison_account_v1', POSTS='xison_posts_v1', SESSION='xison_session_v1';"""
+)
+
+# Require a completed challenge before either sensitive action.
+html = html.replace(
+    " $('createBtn').addEventListener('click',()=>{",
+    " $('createBtn').addEventListener('click',()=>{"
+)
+html = html.replace(
+    " const existing=readAccount();\n if(existing)",
+    " if(!xisonCaptchaPassed()) return;\n const existing=readAccount();\n if(existing)"
+)
+html = html.replace(
+    " $('createBtn').disabled=true;$('createBtn').textContent='Account created — code downloaded';",
+    " resetXisonCaptcha();$('createBtn').disabled=true;$('createBtn').textContent='Account created — code downloaded';"
+)
+html = html.replace(
+    "$('loginBtn').addEventListener('click',()=>{\n const a=readAccount();",
+    "$('loginBtn').addEventListener('click',()=>{\n if(!xisonCaptchaPassed()) return;\n const a=readAccount();"
+)
+html = html.replace(
+    "if(code && code===a.code){localStorage.setItem(SESSION,'yes');setMsg('');showApp()}",
+    "if(code && code===a.code){resetXisonCaptcha();localStorage.setItem(SESSION,'yes');setMsg('');showApp()}"
+)
+
+# Add an explicit note that a static-only page cannot perform Google's secure server-side token verification.
+html = html.replace(
+    '<div class="notice">This version stores data in this browser only. It is not yet a real internet-wide service, and accounts do not sync between devices.</div>',
+    '<div class="notice">This version stores data in this browser only. It is not yet a real internet-wide service, and accounts do not sync between devices.</div><div class="notice">reCAPTCHA is displayed using your site key. Full security requires a server to verify the CAPTCHA token with Google using a private secret key. Never put that secret key in this HTML file.</div>'
+)
+
+out = Path("/mnt/data/xison_with_recaptcha.html")
+out.write_text(html, encoding="utf-8")
+print(f"Created {out} ({out.stat().st_size:,} bytes)")
